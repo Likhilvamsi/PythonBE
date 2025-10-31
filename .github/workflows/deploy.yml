@@ -12,6 +12,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # Step 1: Copy Backend Code to Azure VM
       - name: Deploy to VM via SSH
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -21,6 +22,7 @@ jobs:
           source: "."
           target: "~/app/backend/"
 
+      # Step 2: Install dependencies, restart backend, and reload Nginx
       - name: Run Backend on VM
         uses: appleboy/ssh-action@v0.1.10
         with:
@@ -28,6 +30,29 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
+            echo "🚀 Starting backend deployment..."
             cd ~/app/backend
-            pip3 install -r requirements.txt
-            nohup uvicorn main:app --host 0.0.0.0 --port 8000 --reload > backend.log 2>&1 &
+
+            # Create or activate virtual environment
+            if [ ! -d "venv" ]; then
+              python3 -m venv venv
+            fi
+            source venv/bin/activate
+
+            # Install dependencies
+            pip install --upgrade pip
+            pip install -r requirements.txt
+            pip install pyinstrument pytz || true
+
+            # Stop any process running on port 8000
+            sudo fuser -k 8000/tcp || true
+
+            # Start backend
+            nohup uvicorn main:app --host 0.0.0.0 --port 8000 > backend.log 2>&1 &
+            sleep 5
+
+            # Reload Nginx to apply any routing or proxy changes
+            echo "🔄 Reloading Nginx..."
+            sudo nginx -t && sudo systemctl reload nginx
+
+            echo "✅ FastAPI backend deployed and Nginx reloaded successfully!"
