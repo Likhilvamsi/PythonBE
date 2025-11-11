@@ -1,44 +1,49 @@
-name: Build and Deploy FastAPI Backend
+name: Build and Deploy FastAPI Backend to Azure AKS
 
 on:
   push:
-    branches: ["main"]
+    branches:
+      - main
+
+env:
+  IMAGE_NAME: fastapi-backend
 
 jobs:
-  build-deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
+      # Step 1: Checkout Code
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Step 1: Copy backend code to VM
-      - name: Upload Backend to VM
-        uses: appleboy/scp-action@v0.1.7
+      # Step 2: Login to Azure
+      - name: Azure Login
+        uses: azure/login@v2
         with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "."
-          target: "~/app/backend/"
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # Step 2: Restart FastAPI systemd service
-      - name: Restart FastAPI Service
-        uses: appleboy/ssh-action@v0.1.10
+      # Step 3: Build and Push Docker Image to ACR
+      - name: Build and Push Image to ACR
+        run: |
+          az acr login --name ${{ secrets.ACR_NAME }}
+          docker build -t ${{ secrets.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }} .
+          docker push ${{ secrets.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      # Step 4: Set AKS Context
+      - name: Set AKS Context
+        uses: azure/aks-set-context@v3
         with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            echo "🚀 Updating backend..."
-            cd ~/app/backend
-            source venv/bin/activate
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          cluster-name: ${{ secrets.AKS_CLUSTER_NAME }}
+          resource-group: ${{ secrets.AKS_RESOURCE_GROUP }}
 
-            echo "📦 Installing dependencies..."
-            pip install --upgrade pip
-            pip install -r requirements.txt
-
-            echo "🔁 Restarting FastAPI service..."
-            sudo systemctl restart fastapi
-            sudo systemctl status fastapi --no-pager
-            echo "✅ Deployment complete!"
+      # Step 5: Deploy to AKS
+      - name: Deploy to AKS
+        uses: azure/k8s-deploy@v4
+        with:
+          manifests: |
+            k8s/deployment.yaml
+            k8s/service.yaml
+          images: |
+            ${{ secrets.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}
