@@ -17,3 +17,7 @@ spec:
         image: deploy01.azurecr.io/fastapi-backend:latest
         ports:
         - containerPort: 8000
+        env:
+        - name: DATABASE_URL
+          value: "mysql+pymysql://devuser:Password123#@prodapi1db.mysql.database.azure.com:3306/mydatabase"
+
